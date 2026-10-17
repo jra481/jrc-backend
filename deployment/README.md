@@ -13,6 +13,11 @@ idempotent, so restarts safely skip migrations that are already applied. If a
 Render dashboard start command overrides the Procfile, use the command above
 there as well.
 
+The WSGI entrypoint also runs migrations by default (`RUN_MIGRATIONS_ON_START=true`)
+so an explicit Render start command cannot accidentally serve an outdated schema.
+Set it to `false` only when a dedicated release step runs migrations before the
+web process starts.
+
 The WSGI module is `myproject.wsgi`; this is a Django application, so
 `gunicorn app:app` will fail with `ModuleNotFoundError: No module named 'app'`.
 The root `Procfile` contains the same start command for deployments that read
