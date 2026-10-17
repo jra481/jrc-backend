@@ -5,7 +5,13 @@
 Use the repository root as the service root. Configure the service with:
 
 - Build command: `pip install -r requirements.txt`
-- Start command: `gunicorn myproject.wsgi:application`
+- Start command: `python manage.py migrate --noinput && gunicorn myproject.wsgi:application`
+
+The migration step is required because the homepage API reads the newer
+`HomepageLink`, `TrustBenefit`, brand, and vehicle catalog schema. It is
+idempotent, so restarts safely skip migrations that are already applied. If a
+Render dashboard start command overrides the Procfile, use the command above
+there as well.
 
 The WSGI module is `myproject.wsgi`; this is a Django application, so
 `gunicorn app:app` will fail with `ModuleNotFoundError: No module named 'app'`.
