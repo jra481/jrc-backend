@@ -9,8 +9,8 @@ Set these values in the deployment environment or an untracked `.env` file:
 
 ```dotenv
 GOOGLE_CLIENT_ID=<Google Web application client ID>
-SITE_URL=https://eehook-frondent-web.vercel.app
-STOREFRONT_ORIGINS=https://eehook-frondent-web.vercel.app
+SITE_URL=https://jrc-frontend.vercel.app
+STOREFRONT_ORIGINS=https://jrc-frontend.vercel.app
 
 EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
 EMAIL_HOST=smtp.gmail.com
@@ -55,7 +55,7 @@ Add these Authorized JavaScript origins:
 ```text
 http://localhost:5173
 http://127.0.0.1:5173
-https://eehook-frondent-web.vercel.app
+https://jrc-frontend.vercel.app
 ```
 
 Add any real custom storefront origin only after it is known and deployed.
