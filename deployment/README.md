@@ -1,5 +1,17 @@
 # Production edge configuration
 
+## Render
+
+Use the repository root as the service root. Configure the service with:
+
+- Build command: `pip install -r requirements.txt`
+- Start command: `gunicorn myproject.wsgi:application`
+
+The WSGI module is `myproject.wsgi`; this is a Django application, so
+`gunicorn app:app` will fail with `ModuleNotFoundError: No module named 'app'`.
+The root `Procfile` contains the same start command for deployments that read
+their command from the repository.
+
 Terminate TLS at either an AWS Application Load Balancer or Nginx.  In both
 cases, listen publicly only on HTTPS and redirect HTTP with a permanent 301.
 
