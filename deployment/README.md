@@ -12,6 +12,12 @@ The WSGI module is `myproject.wsgi`; this is a Django application, so
 The root `Procfile` contains the same start command for deployments that read
 their command from the repository.
 
+Django allows Render's public service hostname automatically when Render
+provides `RENDER_EXTERNAL_HOSTNAME` (or `RENDER_EXTERNAL_URL`). If those
+variables are unavailable, set `ALLOWED_HOSTS` or `DEPLOYMENT_ALLOWED_HOSTS`
+to include the exact backend hostname, for example
+`jrc-backend-xgsd.onrender.com`. Do not use `*` in production.
+
 Terminate TLS at either an AWS Application Load Balancer or Nginx.  In both
 cases, listen publicly only on HTTPS and redirect HTTP with a permanent 301.
 
