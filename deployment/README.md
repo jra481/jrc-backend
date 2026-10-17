@@ -43,3 +43,8 @@ domains. For a same-origin
 storefront `/api` proxy, keep
 `JWT_COOKIE_SAMESITE=Lax`; only use `None` when the browser calls a genuinely
 cross-site API origin directly.
+
+Configure `MEMCACHED_LOCATION` to a reachable shared Memcached service. The
+application defaults `MEMCACHED_IGNORE_EXCEPTIONS=true`, so a temporary cache
+outage leaves the API available while cache-backed throttles degrade safely;
+set it to `false` when the deployment requires throttling to fail closed.

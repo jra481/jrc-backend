@@ -331,6 +331,13 @@ else:
             "MEMCACHED_LOCATION must be configured when DEBUG=False "
             "(for example, 127.0.0.1:11211)."
         )
+    # Cache-backed throttles must not turn a temporary Memcached outage into
+    # a 500 for every public API request. When the cache is unavailable,
+    # pymemcache returns backend defaults and throttling is temporarily
+    # fail-open; set MEMCACHED_IGNORE_EXCEPTIONS=false to fail closed instead.
+    _memcached_ignore_exceptions = os.getenv(
+        "MEMCACHED_IGNORE_EXCEPTIONS", "true"
+    ).lower() in ("true", "1", "t", "yes", "on")
     CACHES = {
         "default": {
             "BACKEND": "django.core.cache.backends.memcached.PyMemcacheCache",
@@ -338,7 +345,7 @@ else:
             "OPTIONS": {
                 "no_delay": True,
                 "use_pooling": True,
-                "ignore_exc": False,
+                "ignore_exc": _memcached_ignore_exceptions,
             },
         }
     }
