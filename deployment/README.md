@@ -7,6 +7,14 @@ Use the repository root as the service root. Configure the service with:
 - Build command: `pip install -r requirements.txt`
 - Start command: `python manage.py migrate --noinput && gunicorn myproject.wsgi:application`
 
+Configure the database before deploying. The application reads Render's
+`DATABASE_URL` for either PostgreSQL (`postgresql://...`) or MySQL
+(`mysql://...`). If `DATABASE_URL` is not available, configure all of
+`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` instead. Do not
+set `DB_HOST` to `127.0.0.1` or `localhost` on Render unless a database server
+is running in the same container; that is the cause of the common
+`Can't connect to MySQL server on '127.0.0.1'` deployment failure.
+
 The migration step is required because the homepage API reads the newer
 `HomepageLink`, `TrustBenefit`, brand, and vehicle catalog schema. It is
 idempotent, so restarts safely skip migrations that are already applied. If a

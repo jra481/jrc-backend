@@ -8,7 +8,7 @@ from pathlib import Path
 from datetime import timedelta
 import os
 import sys
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -127,17 +127,74 @@ WSGI_APPLICATION = "myproject.wsgi.application"
 
 
 # DATABASE
+#
+# Render commonly exposes a managed database as DATABASE_URL. Keep support
+# for the existing DB_* variables as well, but never silently point a
+# production deployment at a database running inside the web container.
+_database_url = os.getenv("DATABASE_URL", "").strip()
+if _database_url:
+    _database_url_parts = urlsplit(_database_url)
+    _database_scheme = _database_url_parts.scheme.lower()
+    if _database_scheme in {"postgres", "postgresql"}:
+        _database_engine = "django.db.backends.postgresql"
+    elif _database_scheme in {"mysql", "mysql2"}:
+        _database_engine = "django.db.backends.mysql"
+    else:
+        raise RuntimeError(
+            "DATABASE_URL must use a PostgreSQL or MySQL URL scheme "
+            "(postgresql:// or mysql://)."
+        )
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.mysql",
-        "NAME": os.getenv("DB_NAME"),
-        "USER": os.getenv("DB_USER"),
-        "PASSWORD": os.getenv("DB_PASSWORD"),
-        "HOST": os.getenv("DB_HOST","127.0.0.1"),
-        "PORT": os.getenv("DB_PORT","3306"),
+    _database_name = unquote(_database_url_parts.path.lstrip("/"))
+    if not _database_url_parts.hostname or not _database_name:
+        raise RuntimeError("DATABASE_URL must include a database host and name.")
+
+    DATABASES = {
+        "default": {
+            "ENGINE": _database_engine,
+            "NAME": _database_name,
+            "USER": unquote(_database_url_parts.username or ""),
+            "PASSWORD": unquote(_database_url_parts.password or ""),
+            "HOST": _database_url_parts.hostname,
+            "PORT": str(
+                _database_url_parts.port
+                or ("5432" if _database_engine.endswith("postgresql") else "3306")
+            ),
+        }
     }
-}
+    _database_query = parse_qs(_database_url_parts.query)
+    if _database_engine.endswith("postgresql"):
+        _postgres_options = {
+            option: _database_query[option][0]
+            for option in ("sslmode", "channel_binding", "sslnegotiation")
+            if option in _database_query
+        }
+        # Neon requires TLS. Standard Neon URLs already include sslmode, but
+        # keep this safe when the URL was copied without its query string.
+        if not _postgres_options and _database_url_parts.hostname.endswith(".neon.tech"):
+            _postgres_options["sslmode"] = "require"
+        if _postgres_options:
+            DATABASES["default"]["OPTIONS"] = _postgres_options
+else:
+    _database_host = os.getenv("DB_HOST", "").strip()
+    if not _database_host and (DEBUG or _IS_TESTING):
+        _database_host = "127.0.0.1"
+    if not _database_host:
+        raise RuntimeError(
+            "Database is not configured. Set DATABASE_URL, or set DB_HOST, "
+            "DB_NAME, DB_USER, DB_PASSWORD, and DB_PORT in the deployment environment."
+        )
+
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.mysql",
+            "NAME": os.getenv("DB_NAME"),
+            "USER": os.getenv("DB_USER"),
+            "PASSWORD": os.getenv("DB_PASSWORD"),
+            "HOST": _database_host,
+            "PORT": os.getenv("DB_PORT", "3306"),
+        }
+    }
 
 
 # Password validation
