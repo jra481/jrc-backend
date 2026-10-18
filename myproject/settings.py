@@ -166,13 +166,21 @@ if _database_url:
     if _database_engine.endswith("postgresql"):
         _postgres_options = {
             option: _database_query[option][0]
-            for option in ("sslmode", "channel_binding", "sslnegotiation")
+            for option in (
+                "sslmode",
+                "channel_binding",
+                "sslnegotiation",
+                "connect_timeout",
+            )
             if option in _database_query
         }
         # Neon requires TLS. Standard Neon URLs already include sslmode, but
         # keep this safe when the URL was copied without its query string.
         if not _postgres_options and _database_url_parts.hostname.endswith(".neon.tech"):
             _postgres_options["sslmode"] = "require"
+        _postgres_options.setdefault(
+            "connect_timeout", os.getenv("DB_CONNECT_TIMEOUT", "15")
+        )
         if _postgres_options:
             DATABASES["default"]["OPTIONS"] = _postgres_options
 else:
