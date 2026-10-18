@@ -57,6 +57,11 @@ storefront `/api` proxy, keep
 `JWT_COOKIE_SAMESITE=Lax`; only use `None` when the browser calls a genuinely
 cross-site API origin directly.
 
+If the storefront is hosted on Vercel and the API is hosted on Render as
+separate origins, set `JWT_COOKIE_SAMESITE=None` in the Render environment.
+Keep `JWT_COOKIE_DOMAIN` empty so the HttpOnly cookies belong to the API host,
+and keep `CORS_ALLOW_CREDENTIALS=True` (the application already does this).
+
 Configure `MEMCACHED_LOCATION` to a reachable shared Memcached service. The
 application defaults `MEMCACHED_IGNORE_EXCEPTIONS=true`, so a temporary cache
 outage leaves the API available while cache-backed throttles degrade safely;
