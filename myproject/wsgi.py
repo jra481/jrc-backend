@@ -15,10 +15,9 @@ from django.core.wsgi import get_wsgi_application
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'myproject.settings')
 
-# Some Render services have an explicit dashboard start command that bypasses
-# the repository Procfile. Keep the database schema current in that case too.
-# This is idempotent and can be disabled for deployments that run migrations
-# through a dedicated release step with RUN_MIGRATIONS_ON_START=false.
+# Keep an optional migration safety net for platforms that start the WSGI
+# module directly. AWS EC2 uses a dedicated release step and sets this
+# to false so multiple Gunicorn workers never race to migrate on boot.
 django.setup()
 if os.getenv("RUN_MIGRATIONS_ON_START", "true").lower() in (
     "true",

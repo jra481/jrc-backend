@@ -37,22 +37,6 @@ _allowed_hosts_value = (
 )
 ALLOWED_HOSTS = [host.strip() for host in _allowed_hosts_value.split(",") if host.strip()]
 
-# Render exposes the public service hostname at runtime. Include it in the
-# Django host allowlist so a service cannot return ``DisallowedHost`` for its
-# own public URL just because ALLOWED_HOSTS was not copied into the dashboard.
-# Explicit ALLOWED_HOSTS values are still preserved and remain the source of
-# truth for every other host.
-_render_hostname = os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip()
-_render_url = os.getenv("RENDER_EXTERNAL_URL", "").strip()
-if _render_hostname:
-    _render_hostname = urlsplit(
-        _render_hostname if "://" in _render_hostname else f"//{_render_hostname}"
-    ).hostname or ""
-if not _render_hostname and _render_url:
-    _render_hostname = urlsplit(_render_url).hostname or ""
-if _render_hostname and _render_hostname not in ALLOWED_HOSTS:
-    ALLOWED_HOSTS.append(_render_hostname)
-
 if not DEBUG:
     if (
         len(SECRET_KEY) < 50
@@ -128,9 +112,9 @@ WSGI_APPLICATION = "myproject.wsgi.application"
 
 # DATABASE
 #
-# Render commonly exposes a managed database as DATABASE_URL. Keep support
-# for the existing DB_* variables as well, but never silently point a
-# production deployment at a database running inside the web container.
+# Prefer a managed PostgreSQL or MySQL connection string in DATABASE_URL.
+# Keep support for the existing DB_* variables as well, but never silently
+# point a production deployment at a database running inside the web process.
 _database_url = os.getenv("DATABASE_URL", "").strip()
 if _database_url:
     _database_url_parts = urlsplit(_database_url)

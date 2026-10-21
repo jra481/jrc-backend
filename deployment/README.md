@@ -1,68 +1,188 @@
-# Production edge configuration
+# AWS EC2 deployment
 
-## Render
+This backend is a Django application deployed to an Ubuntu 24.04 LTS EC2
+instance. The supported layout is:
 
-Use the repository root as the service root. Configure the service with:
+```text
+Internet -> EC2 security group -> Nginx :443 -> Gunicorn 127.0.0.1:8000 -> Django
+                                                        |-> Neon PostgreSQL (recommended)
+                                                        |-> local Memcached 127.0.0.1:11211
+```
 
-- Build command: `pip install -r requirements.txt`
-- Start command: `python manage.py migrate --noinput && gunicorn myproject.wsgi:application`
+The EC2 instance does not need to run PostgreSQL when the existing Neon
+database is kept. If the database is moved to AWS later, set the `DB_*`
+variables instead of `DATABASE_URL` and keep MySQL bound to localhost or a
+private subnet.
 
-Configure the database before deploying. The application reads Render's
-`DATABASE_URL` for either PostgreSQL (`postgresql://...`) or MySQL
-(`mysql://...`). If `DATABASE_URL` is not available, configure all of
-`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` instead. Do not
-set `DB_HOST` to `127.0.0.1` or `localhost` on Render unless a database server
-is running in the same container; that is the cause of the common
-`Can't connect to MySQL server on '127.0.0.1'` deployment failure.
+## 1. AWS prerequisites
 
-The migration step is required because the homepage API reads the newer
-`HomepageLink`, `TrustBenefit`, brand, and vehicle catalog schema. It is
-idempotent, so restarts safely skip migrations that are already applied. If a
-Render dashboard start command overrides the Procfile, use the command above
-there as well.
+Create an Ubuntu 24.04 LTS 64-bit EC2 instance. A small general-purpose
+instance is enough to start; increase the instance size after observing CPU
+and memory usage. Allocate an Elastic IP and create a DNS `A` record such as
+`api.example.com` pointing to it.
 
-The WSGI entrypoint also runs migrations by default (`RUN_MIGRATIONS_ON_START=true`)
-so an explicit Render start command cannot accidentally serve an outdated schema.
-Set it to `false` only when a dedicated release step runs migrations before the
-web process starts.
+Configure the instance security group with these inbound rules:
 
-The WSGI module is `myproject.wsgi`; this is a Django application, so
-`gunicorn app:app` will fail with `ModuleNotFoundError: No module named 'app'`.
-The root `Procfile` contains the same start command for deployments that read
-their command from the repository.
+- TCP 22 only from your administration IP range
+- TCP 80 from the internet (needed for the certificate challenge and HTTP redirect)
+- TCP 443 from the internet
 
-Django allows Render's public service hostname automatically when Render
-provides `RENDER_EXTERNAL_HOSTNAME` (or `RENDER_EXTERNAL_URL`). If those
-variables are unavailable, set `ALLOWED_HOSTS` or `DEPLOYMENT_ALLOWED_HOSTS`
-to include the exact backend hostname, for example
-`jrc-backend-xgsd.onrender.com`. Do not use `*` in production.
+Do not expose TCP 8000 or TCP 11211. The instance firewall below also keeps
+those ports private.
 
-Terminate TLS at either an AWS Application Load Balancer or Nginx.  In both
-cases, listen publicly only on HTTPS and redirect HTTP with a permanent 301.
+Connect using the EC2 key pair and the Ubuntu user:
 
-For an EC2 Nginx deployment, adapt `nginx/eehook-api.conf.example`, install a
-valid certificate (for example, Certbot), and proxy only to Gunicorn on
-`127.0.0.1:8000`.  Do not expose Gunicorn's port in the EC2 security group.
+```bash
+ssh -i /path/to/key.pem ubuntu@<elastic-ip>
+```
 
-For an ALB deployment, configure an HTTP:80 listener whose only action is a
-redirect to HTTPS:443; configure the HTTPS listener to forward to a private
-target group.  The load balancer must overwrite `X-Forwarded-Proto` with
-`https`.  Keep the instance security group limited to the ALB security group.
+## 2. Install the VM dependencies
 
-Set `STOREFRONT_ORIGINS` to every exact HTTPS browser origin allowed to send
-credentialed requests. This must include the deployed Jamal Rafeeq storefront
-origin (`https://jrc-frontend.vercel.app`) as well as any custom storefront
-domains. For a same-origin
-storefront `/api` proxy, keep
-`JWT_COOKIE_SAMESITE=Lax`; only use `None` when the browser calls a genuinely
-cross-site API origin directly.
+Run the following on the EC2 instance:
 
-If the storefront is hosted on Vercel and the API is hosted on Render as
-separate origins, set `JWT_COOKIE_SAMESITE=None` in the Render environment.
-Keep `JWT_COOKIE_DOMAIN` empty so the HttpOnly cookies belong to the API host,
-and keep `CORS_ALLOW_CREDENTIALS=True` (the application already does this).
+```bash
+sudo apt update
+sudo apt install -y git python3-venv python3-dev build-essential nginx memcached certbot python3-certbot-nginx
+sudo adduser --system --group --home /srv/eehook-backend deploy
+sudo install -d -o deploy -g deploy /srv/eehook-backend
+sudo ufw allow OpenSSH
+sudo ufw allow 'Nginx Full'
+sudo ufw --force enable
+```
 
-Configure `MEMCACHED_LOCATION` to a reachable shared Memcached service. The
-application defaults `MEMCACHED_IGNORE_EXCEPTIONS=true`, so a temporary cache
-outage leaves the API available while cache-backed throttles degrade safely;
-set it to `false` when the deployment requires throttling to fail closed.
+Clone the repository and install the dependencies:
+
+```bash
+sudo -u deploy git clone https://github.com/jra481/jrc-backend.git /srv/eehook-backend
+cd /srv/eehook-backend
+sudo -u deploy python3 -m venv .venv
+sudo -u deploy .venv/bin/python -m pip install --upgrade pip
+sudo -u deploy .venv/bin/pip install -r requirements.txt
+sudo sed -i 's/^#\?\s*-l .*/-l 127.0.0.1/' /etc/memcached.conf
+sudo sed -i 's/^#\?\s*-U .*/-U 0/' /etc/memcached.conf
+sudo systemctl enable --now memcached
+```
+
+Memcached is intentionally bound to localhost. Verify it with:
+
+```bash
+sudo ss -ltnp | grep 11211
+```
+
+## 3. Configure production environment
+
+Create the root-owned environment file and fill it with real production
+values. Do not commit this file:
+
+```bash
+sudo cp /srv/eehook-backend/.env.example /etc/eehook-backend.env
+sudo chown root:deploy /etc/eehook-backend.env
+sudo chmod 640 /etc/eehook-backend.env
+sudoedit /etc/eehook-backend.env
+```
+
+At minimum, set:
+
+```dotenv
+DEBUG=False
+SECRET_KEY=<strong-random-secret-at-least-50-characters>
+ALLOWED_HOSTS=api.example.com
+DEPLOYMENT_ALLOWED_HOSTS=api.example.com
+SITE_URL=https://jrc-frontend.vercel.app
+STOREFRONT_ORIGINS=https://jrc-frontend.vercel.app
+DATABASE_URL=postgresql://<user>:<url-encoded-password>@<neon-pooler-host>/<database>?sslmode=require
+MEMCACHED_LOCATION=127.0.0.1:11211
+RUN_MIGRATIONS_ON_START=false
+JWT_COOKIE_SAMESITE=None
+TRUST_PROXY_SSL_HEADER=true
+```
+
+Add the Google, SMTP, Stripe, WhatsApp, and any other application secrets to
+the same file. Keep `JWT_COOKIE_DOMAIN` empty. `JWT_COOKIE_SAMESITE=None` is
+required when the Vercel storefront calls the API on a different site; use
+`Lax` only when the frontend and API are served through the same site/proxy.
+
+The database password must be URL-encoded inside `DATABASE_URL`. Never use
+`127.0.0.1` as the database host unless the database is installed on this
+same EC2 instance.
+
+In the frontend's Vercel project settings, set the production build variable
+`VITE_API_BASE_URL=https://api.example.com/api` and redeploy the frontend. Do
+not leave the production value as `/api` unless Vercel is explicitly
+configured with a proxy rewrite to the EC2 API.
+
+## 4. First release
+
+Run the checks, migrations, and static collection as the `deploy` user:
+
+```bash
+cd /srv/eehook-backend
+sudo -u deploy .venv/bin/python manage.py check --deploy
+sudo -u deploy .venv/bin/python manage.py migrate --noinput
+sudo -u deploy .venv/bin/python manage.py collectstatic --noinput
+sudo install -d -o deploy -g deploy /srv/eehook-backend/uploads
+```
+
+Install and start the systemd service:
+
+```bash
+sudo cp /srv/eehook-backend/deployment/aws-ec2/eehook-backend.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now eehook-backend
+sudo systemctl status eehook-backend --no-pager
+```
+
+The service runs Gunicorn on localhost only. It uses two workers and two
+threads, a conservative starting point for a small EC2 instance.
+
+## 5. Nginx and HTTPS
+
+Copy `nginx/eehook-api.conf.example` to
+`/etc/nginx/sites-available/eehook-api.conf`, replace `api.example.com` with
+the real hostname, and obtain the certificate before enabling the final
+HTTPS-enabled config:
+
+```bash
+sudo certbot certonly --standalone -d api.example.com \
+  --pre-hook "systemctl stop nginx" \
+  --post-hook "systemctl start nginx"
+sudo ln -s /etc/nginx/sites-available/eehook-api.conf /etc/nginx/sites-enabled/eehook-api.conf
+sudo nginx -t
+sudo systemctl enable nginx
+sudo systemctl reload nginx
+```
+
+The template proxies only to `127.0.0.1:8000`, serves Django static/media
+files, redirects HTTP to HTTPS, and sets the trusted forwarded protocol used
+by Django. Keep port 8000 closed in both the EC2 security group and UFW.
+
+## 6. Updates
+
+Use this release sequence for subsequent deployments:
+
+```bash
+cd /srv/eehook-backend
+sudo -u deploy git pull --ff-only origin main
+sudo -u deploy .venv/bin/pip install -r requirements.txt
+sudo -u deploy .venv/bin/python manage.py migrate --noinput
+sudo -u deploy .venv/bin/python manage.py collectstatic --noinput
+sudo systemctl restart eehook-backend
+sudo journalctl -u eehook-backend -n 100 --no-pager
+```
+
+Migrations run once before the service restart. Keeping
+`RUN_MIGRATIONS_ON_START=false` prevents every Gunicorn worker from attempting
+to migrate during a restart.
+
+## 7. Verify the deployment
+
+From any machine that can reach the DNS record:
+
+```bash
+curl -fsS https://api.example.com/health/
+```
+
+The response should report the API as healthy. If it fails, inspect both
+`sudo journalctl -u eehook-backend` and `/var/log/nginx/error.log`. Check that
+DNS, the EC2 security group, UFW, `ALLOWED_HOSTS`, CORS origins, and the
+database URL all match the deployed hostnames.

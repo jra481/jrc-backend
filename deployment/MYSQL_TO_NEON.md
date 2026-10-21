@@ -71,14 +71,17 @@ python manage.py sqlsequencereset admin auth contenttypes sessions token_blackli
 If `dbshell` is unavailable locally, install the PostgreSQL client or run the
 SQL emitted by `sqlsequencereset` in the Neon SQL Editor.
 
-## 4. Render configuration
+## 4. AWS EC2 configuration
 
-Set `DATABASE_URL` in the Render web service to the Neon pooled connection
-string. Remove old `DB_HOST`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` values or
-leave them unused; `DATABASE_URL` takes precedence. Keep the start command:
+Set `DATABASE_URL` in `/etc/eehook-backend.env` on the AWS EC2 instance to the
+Neon pooled connection string. Remove old `DB_HOST`, `DB_NAME`, `DB_USER`, and
+`DB_PASSWORD` values or leave them unused; `DATABASE_URL` takes precedence.
+Run the migration and service commands from `deployment/README.md`:
 
-```text
-python manage.py migrate --noinput && gunicorn myproject.wsgi:application
+```bash
+sudo -u deploy /srv/eehook-backend/.venv/bin/python \
+  /srv/eehook-backend/manage.py migrate --noinput
+sudo systemctl restart eehook-backend
 ```
 
 Never use `127.0.0.1` or `localhost` for the Neon host.
