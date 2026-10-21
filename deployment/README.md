@@ -4,9 +4,9 @@ This backend is a Django application deployed to an Ubuntu 24.04 LTS EC2
 instance. The supported layout is:
 
 ```text
-Internet -> EC2 security group -> Nginx :443 -> Gunicorn 127.0.0.1:8000 -> Django
-                                                        |-> Neon PostgreSQL (recommended)
-                                                        |-> local Memcached 127.0.0.1:11211
+Browser -> Vercel HTTPS -> EC2 :80 -> Nginx -> Gunicorn 127.0.0.1:8000 -> Django
+                                                               |-> Neon PostgreSQL
+                                                               |-> local Memcached 127.0.0.1:11211
 ```
 
 The EC2 instance does not need to run PostgreSQL when the existing Neon
@@ -18,8 +18,9 @@ private subnet.
 
 Create an Ubuntu 24.04 LTS 64-bit EC2 instance. A small general-purpose
 instance is enough to start; increase the instance size after observing CPU
-and memory usage. Allocate an Elastic IP and create a DNS `A` record such as
-`api.example.com` pointing to it.
+and memory usage. Allocate an Elastic IP. The current frontend uses a Vercel
+external rewrite to the fixed backend address `13.50.221.204`, so a separate
+API DNS record is not required for this proxy setup.
 
 Configure the instance security group with these inbound rules:
 
@@ -86,30 +87,29 @@ At minimum, set:
 ```dotenv
 DEBUG=False
 SECRET_KEY=<strong-random-secret-at-least-50-characters>
-ALLOWED_HOSTS=api.example.com
-DEPLOYMENT_ALLOWED_HOSTS=api.example.com
+ALLOWED_HOSTS=13.50.221.204,jrc-frontend.vercel.app
+DEPLOYMENT_ALLOWED_HOSTS=13.50.221.204,jrc-frontend.vercel.app
 SITE_URL=https://jrc-frontend.vercel.app
 STOREFRONT_ORIGINS=https://jrc-frontend.vercel.app
 DATABASE_URL=postgresql://<user>:<url-encoded-password>@<neon-pooler-host>/<database>?sslmode=require
 MEMCACHED_LOCATION=127.0.0.1:11211
 RUN_MIGRATIONS_ON_START=false
-JWT_COOKIE_SAMESITE=None
+JWT_COOKIE_SAMESITE=Lax
 TRUST_PROXY_SSL_HEADER=true
 ```
 
 Add the Google, SMTP, Stripe, WhatsApp, and any other application secrets to
-the same file. Keep `JWT_COOKIE_DOMAIN` empty. `JWT_COOKIE_SAMESITE=None` is
-required when the Vercel storefront calls the API on a different site; use
-`Lax` only when the frontend and API are served through the same site/proxy.
+the same file. Keep `JWT_COOKIE_DOMAIN` empty. Because the Vercel rewrite
+keeps API calls same-origin in the browser, `JWT_COOKIE_SAMESITE=Lax` is the
+appropriate setting for this proxy setup.
 
 The database password must be URL-encoded inside `DATABASE_URL`. Never use
 `127.0.0.1` as the database host unless the database is installed on this
 same EC2 instance.
 
-In the frontend's Vercel project settings, set the production build variable
-`VITE_API_BASE_URL=https://api.example.com/api` and redeploy the frontend. Do
-not leave the production value as `/api` unless Vercel is explicitly
-configured with a proxy rewrite to the EC2 API.
+In the frontend's Vercel project settings, remove any old Render API value.
+Leave `VITE_API_BASE_URL` unset or set it to `/api`, then redeploy. The
+repository's `vercel.json` proxies `/api/*` and `/media/*` to EC2.
 
 ## 4. First release
 
@@ -135,26 +135,26 @@ sudo systemctl status eehook-backend --no-pager
 The service runs Gunicorn on localhost only. It uses two workers and two
 threads, a conservative starting point for a small EC2 instance.
 
-## 5. Nginx and HTTPS
+## 5. Nginx and the Vercel proxy
 
-Copy `nginx/eehook-api.conf.example` to
-`/etc/nginx/sites-available/eehook-api.conf`, replace `api.example.com` with
-the real hostname, and obtain the certificate before enabling the final
-HTTPS-enabled config:
+Copy `nginx/eehook-api-proxy.conf.example` to
+`/etc/nginx/sites-available/eehook-api.conf` and enable it:
 
 ```bash
-sudo certbot certonly --standalone -d api.example.com \
-  --pre-hook "systemctl stop nginx" \
-  --post-hook "systemctl start nginx"
+sudo cp /srv/eehook-backend/deployment/nginx/eehook-api-proxy.conf.example \
+  /etc/nginx/sites-available/eehook-api.conf
 sudo ln -s /etc/nginx/sites-available/eehook-api.conf /etc/nginx/sites-enabled/eehook-api.conf
 sudo nginx -t
 sudo systemctl enable nginx
 sudo systemctl reload nginx
 ```
 
-The template proxies only to `127.0.0.1:8000`, serves Django static/media
-files, redirects HTTP to HTTPS, and sets the trusted forwarded protocol used
-by Django. Keep port 8000 closed in both the EC2 security group and UFW.
+Vercel terminates browser HTTPS. The EC2 template accepts the proxy traffic
+on port 80, proxies to `127.0.0.1:8000`, serves Django static/media files,
+and marks the forwarded request as HTTPS for Django. Keep port 8000 and
+11211 closed in both the EC2 security group and UFW. For end-to-end TLS
+directly to EC2, replace this proxy mode later with a custom API domain and
+the HTTPS Nginx template.
 
 ## 6. Updates
 
@@ -176,13 +176,13 @@ to migrate during a restart.
 
 ## 7. Verify the deployment
 
-From any machine that can reach the DNS record:
+After the frontend is redeployed, verify through the Vercel domain:
 
 ```bash
-curl -fsS https://api.example.com/health/
+curl -fsS https://jrc-frontend.vercel.app/api/health/
 ```
 
 The response should report the API as healthy. If it fails, inspect both
 `sudo journalctl -u eehook-backend` and `/var/log/nginx/error.log`. Check that
-DNS, the EC2 security group, UFW, `ALLOWED_HOSTS`, CORS origins, and the
-database URL all match the deployed hostnames.
+the EC2 security group, UFW, Vercel rewrites, `ALLOWED_HOSTS`, CORS origins,
+and the database URL all match the deployed hostnames.

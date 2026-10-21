@@ -1,0 +1,26 @@
+# Vercel terminates public HTTPS and rewrites /api/* and /media/* to this EC2
+# instance. Keep port 8000 and Memcached private.
+
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name 13.50.221.204 _;
+
+    client_max_body_size 10m;
+
+    location /static/ {
+        alias /srv/eehook-backend/staticfiles/;
+    }
+
+    location /media/ {
+        alias /srv/eehook-backend/uploads/;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}
