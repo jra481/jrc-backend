@@ -451,8 +451,11 @@ class AdminBrandViewSet(AdminModelViewSet):
         class BrandAdminSerializer(serializers.ModelSerializer):
             class Meta:
                 model = Brand
-                fields = "__all__"
-                read_only_fields = ("id", "created_at")
+                # The dashboard manages only the public brand name and its
+                # active state. Keep legacy logo files stored, but do not
+                # expose them as editable dashboard fields.
+                fields = ("id", "name", "is_active")
+                read_only_fields = ("id",)
 
         return BrandAdminSerializer
 
