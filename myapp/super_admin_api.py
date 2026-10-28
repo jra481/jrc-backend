@@ -6,6 +6,7 @@ including multipart uploads and the nested Product records used by the admin
 inlines.
 """
 
+from django.db.models import Prefetch
 from django.db.models.fields import NOT_PROVIDED
 from django.db import transaction
 from django.contrib.auth.password_validation import validate_password
@@ -129,6 +130,7 @@ class AdminProductSerializer(serializers.ModelSerializer):
     )
     manual_related_products = serializers.SerializerMethodField(read_only=True)
     fitments = ProductFitmentSerializer(many=True, required=False)
+    product_image = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Product
@@ -144,13 +146,13 @@ class AdminProductSerializer(serializers.ModelSerializer):
             "offer",
             "name",
             "description",
+            "product_image",
             "is_active",
             "created_at",
             "updated_at",
             "key_features",
             "shipping_fee",
             "estimated_delivery_time",
-            "seller_name",
             "warranty_info",
             "current_viewers_count",
             "promotional_banner_image",
@@ -224,6 +226,16 @@ class AdminProductSerializer(serializers.ModelSerializer):
             }
             for link in links
         ]
+
+    def get_product_image(self, obj):
+        for variant in obj.variants.all():
+            images = list(variant.images.all())
+            image = next((item for item in images if item.is_primary), None)
+            image = image or (images[0] if images else None)
+            if image:
+                request = self.context.get("request")
+                return request.build_absolute_uri(image.image.url) if request else image.image.url
+        return None
 
     @staticmethod
     def _sync_fitments(product, fitments):
@@ -636,6 +648,7 @@ class AdminProductViewSet(AdminModelViewSet):
     ).prefetch_related(
         "related_product_links__related_product",
         "fitments",
+        Prefetch("variants__images", queryset=ProductImage.objects.order_by("position", "id")),
     ).all()
     serializer_class = AdminProductSerializer
     # Product identifiers live on the product's variants in the current
@@ -962,6 +975,7 @@ ADMIN_RESOURCES = (
 
 # Fields disabled in the dashboard while retaining their database data.
 SCHEMA_EXCLUDED_FIELDS = {
+    "products": {"seller_name"},
     "product-variants": {"regions"},
 }
 
